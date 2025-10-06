@@ -1,0 +1,74 @@
+﻿version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    container_name: recipes_db
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: recipes
+      TZ: America/Sao_Paulo
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d recipes"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: recipes_api
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      APP_ENV: docker
+      DATABASE_URL: postgresql+psycopg://app:app@db:5432/recipes
+      SUMMARIZER_BACKEND: textrank
+      ALLOWED_ORIGINS: http://localhost:3000
+      PYTHONPATH: /app
+      TZ: America/Sao_Paulo
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    command: >
+      python -m uvicorn app.main:app
+      --host 0.0.0.0 --port 8000
+      --reload --proxy-headers --forwarded-allow-ips="*"
+
+  front:
+    image: node:20-alpine
+    container_name: recipes_front
+    working_dir: /app
+    
+    volumes:
+      - ./front2:/app
+      
+      - /app/node_modules
+    environment:
+     
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      TZ: America/Sao_Paulo
+    ports:
+      - "3000:3000"
+    command: sh -c "npm install && npm run dev"
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  db-data:
